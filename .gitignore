@@ -2,6 +2,8 @@ node_modules
 # Local Netlify folder
 .netlify
 
-functions
-
-package-lock.json
+functions/
+dist/
+.env
+.env.*
+!.env.example

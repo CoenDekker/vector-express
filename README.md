@@ -1,3 +1,7 @@
+# Vector Express
+
+Shared API base URL: `https://vector-express.netlify.app`.
+
 # Install
 
 npm install -g netlify-cli
@@ -36,77 +40,185 @@ B. (Webpack v4) This will depend on what hash algorithms nodejs supports on your
 # deploy
 
 npm run build
+
+# Compendium APIs
+
+Three separate Express API modules in one npm workspace, deployed together to
+one Netlify site named `vector-express`:
+
+| Workspace                    | Source                                | Routes          | Local Port |
+| ---------------------------- | ------------------------------------- | --------------- | ---------- |
+| `gamelist-express`           | `apps/gamelist-express/src`           | `/api/gamelist` | 8888       |
+| `latelegends-express`        | `apps/latelegends-express/src`        | `/api/ll`       | 8889       |
+| `cooking-compendium-express` | `apps/cooking-compendium-express/src` | `/api/recipes`  | 8890       |
+
+The combined site exposes `GET /api/hello`. Existing route paths and response
+formats are preserved. All three APIs share the same domain:
+
+- `https://vector-express.netlify.app/api/gamelist`
+- `https://vector-express.netlify.app/api/ll/all`
+- `https://vector-express.netlify.app/api/recipes`
+
+## Install, Build, Test
+
+Use Node.js 22.12+ (a supported LTS release is recommended) and npm 10+.
+
+```sh
+npm ci
+npm run build
+npm test
+```
+
+`npm run build` builds the modules and the combined root `functions/api.cjs`
+using esbuild. The root `dist` and `functions` directories are deployed together.
+Tests live with their app under `apps/*/test`. They invoke the built serverless
+handlers with mocked Notion calls, without credentials. The root `npm test`
+builds and runs all app tests; to run one app's tests:
+
+```sh
+npm test --workspace gamelist-express
+npm test --workspace latelegends-express
+npm test --workspace cooking-compendium-express
+```
+
+Select a single app with npm's workspace flag:
+
+```sh
+npm run build --workspace gamelist-express
+npm start --workspace latelegends-express
+npm start --workspace cooking-compendium-express
+```
+
+`npm start` starts the combined API at `http://localhost:8888`. Local development
+uses Netlify Dev; put secrets in an untracked root `.env`, or configure them on
+the linked Netlify site. Workspace start commands run individual modules separately.
+
+## Deploy
+
+Keep the existing Netlify site. In its domain settings, change the default
+Netlify subdomain to `vector-express` (subject to availability). This retains
+the site's ID and environment variables and changes its default URL to
+`https://vector-express.netlify.app`. Renaming the npm package alone does not
+rename the live Netlify site.
+
+Authenticate and link this repository to that existing site once:
+
+```sh
+npx netlify login
+npx netlify link --filter vector-express
 npm run deploy
-
-# Netlify environment variables
-
-Add these three variables to the site's environment variables in Netlify for
-the deployed Functions (including the production environment):
-
-| Variable                | Value                                                                       | Used by                                            |
-| ----------------------- | --------------------------------------------------------------------------- | -------------------------------------------------- |
-| `NOTION_GAMELIST_TOKEN` | Notion integration secret with access to the gamelist database              | Read, search, add, and edit games                  |
-| `NOTION_LL_TOKEN`       | Notion integration secret with access to the LL database                    | Read, add, update, and delete LL builds            |
-| `GAMELIST_WRITE_KEY`    | A new random private key, for example generated with `openssl rand -hex 32` | Authorize adding and editing games via `x-api-key` |
-
-Generate the integration secrets in Notion, then store them in Netlify. One
-Notion integration token may be used for both variables if that integration has
-access to both databases. Do not put these secrets in browser code. Previously
-committed Notion and Twitch/IGDB secrets should be rotated, since removing them
-from the current files does not remove them from Git history.
-
-The inactive IGDB example does not need Netlify variables. To run its local
-requests in `src/igdb.http`, set `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` in
-your local environment; `IGDB_ACCESS_TOKEN` is a short-lived Twitch access
-token obtained from the first request. The Notion HTTP examples use the local
-`NOTION_GAMELIST_TOKEN` environment variable.
-
-# Add a game
-
-Send a JSON request to `POST /api/gamelist` with `GAMELIST_WRITE_KEY` in the
-`x-api-key` header. Keep the key on the server; do not expose it in a browser.
-
-Required fields: `name`, `coverUrl` (an HTTP or HTTPS URL), `platform`, and
-`status`, a non-empty array of unique values from `playing`, `queued`,
-`replaying`, `finished`, `unplayed`, `pause`, and `backlog`. The optional
-`completed` field is a boolean. Optional `developer` is text (up to 200 characters)
-and `release` is a four-digit year (an existing trailing `*` is accepted). These
-map to the Notion `developer` and `release` rich-text properties. The Notion
-`status` property must be Multi-select to store multiple values.
-
-```sh
-curl -X POST http://localhost:8888/api/gamelist \
-	-H "Content-Type: application/json" \
-	-H "x-api-key: $GAMELIST_WRITE_KEY" \
-	-d '{"name":"Example Game","coverUrl":"https://example.com/cover.jpg","platform":"PC","status":["queued"],"completed":false}'
 ```
 
-Successful requests return `201` and the created game. Missing or invalid fields
-return `400`; missing or incorrect API keys return `401`.
+The root deploy command builds and publishes all three APIs in one deployment
+to the linked site. For CI, configure `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`.
+For Git-connected deploys, keep the site's base and package directory at the
+repository root; the root Netlify configuration handles the combined build,
+functions, and `/api/*` rewrite. Do not select an app directory for this site.
 
-# Find and edit a game
+Configure all these variables on the single site (including Functions scope):
 
-`GET /api/gamelist/search?name=Rayman` returns matching games by title, including
-each game's `id`, `name`, `image`, `platform`, `status`, and `rating`. Use the
-`name` for a dropdown label and the `id` as its value, so games with identical
-names can still be selected separately. Responses also include `developer` and
-`release` as text. URL-encode the search term.
+| API                | Variable                                | Purpose                                                |
+| ------------------ | --------------------------------------- | ------------------------------------------------------ |
+| Gamelist           | `NOTION_GAMELIST_TOKEN`                 | Integration access to the existing game database       |
+| Gamelist           | `GAMELIST_WRITE_KEY`                    | Private `x-api-key` for game writes                    |
+| Late Legends       | `NOTION_LL_TOKEN`                       | Integration access to the existing LL database         |
+| Late Legends       | `NOTION_LL_DATABASE_ID`                 | Optional database override; existing ID is the default |
+| Cooking Compendium | `NOTION_COOKING_COMPENDIUM_TOKEN`       | Integration access to the recipe database              |
+| Cooking Compendium | `NOTION_COOKING_COMPENDIUM_DATABASE_ID` | Required recipe database ID                            |
+| Cooking Compendium | `COOKING_COMPENDIUM_WRITE_KEY`          | Private `x-api-key` for recipe writes                  |
 
-Fetch a selected game with `GET /api/gamelist/game/:id`. The response uses
-`image` for the cover URL. To edit it, send `PATCH /api/gamelist/game/:id` with
-`x-api-key` and any combination of `name`, `coverUrl`, `platform`, `status` (a
-non-empty array of unique status values), `rating` (a select value; send an
-empty string to clear it), `completed` (a boolean), `developer`, and `release`.
-Send an empty string to clear either rich-text field; unspecified fields stay
-unchanged. For example:
+Share each Notion database with its integration. Generate write keys with
+`openssl rand -hex 32`; never expose write keys or Notion tokens in browser code.
+Previously committed secrets should be rotated, since deleting them does not
+remove them from Git history. LL's legacy write endpoints retain their existing
+authentication behavior; this split does not add write-key protection to LL.
+
+## Gamelist
+
+The existing Notion schema and database remain unchanged.
+
+| Method | Route                              | Purpose                             |
+| ------ | ---------------------------------- | ----------------------------------- |
+| GET    | `/api/gamelist`                    | Full list                           |
+| GET    | `/api/gamelist/:cursor`            | Page (`initial` for the first page) |
+| GET    | `/api/gamelist/search?name=Rayman` | Search by title                     |
+| GET    | `/api/gamelist/options`            | Platform and status options         |
+| GET    | `/api/gamelist/game/:id`           | Single game                         |
+| POST   | `/api/gamelist`                    | Create game (write key required)    |
+| PATCH  | `/api/gamelist/game/:id`           | Edit game (write key required)      |
+| DELETE | `/api/gamelist/game/:id`           | Trash game (write key required)     |
+
+Creating a game requires `name`, HTTP(S) `coverUrl`, `platform`, and `status`
+(an array of unique non-empty values). Optional fields are `completed` (boolean),
+`developer` (up to 200 characters), and `release` (four-digit year, optional trailing `*`).
+Status options conventionally include `playing`, `replaying`, `queued`, `finished`,
+`unplayed`, `pause`, and `backlog`; multiple values require a Notion Multi-select.
+PATCH accepts any of these fields plus `rating` (select value; empty string clears it).
+Empty strings also clear `developer` and `release`. Responses use `image` for the cover URL.
 
 ```sh
-curl -X PATCH "http://localhost:8888/api/gamelist/game/GAME_ID" \
-	-H "Content-Type: application/json" \
-	-H "x-api-key: $GAMELIST_WRITE_KEY" \
-	-d '{"status":["playing","replaying"],"rating":"8","completed":false}'
+curl -X POST https://vector-express.netlify.app/api/gamelist \
+  -H 'Content-Type: application/json' \
+  -H "x-api-key: $GAMELIST_WRITE_KEY" \
+  -d '{"name":"Example Game","coverUrl":"https://example.com/cover.jpg","platform":"PC","status":["queued"]}'
 ```
 
-Keep the write key in server-side code, not in a public site's browser bundle.
-Updates return the edited game; unknown IDs return `404` and invalid edits
-return `400`.
+The optional IGDB HTTP examples use local `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET`,
+and `IGDB_ACCESS_TOKEN`; they are not needed by the deployed APIs.
+
+## Late Legends
+
+| Method | Route                          | Purpose                                         |
+| ------ | ------------------------------ | ----------------------------------------------- |
+| GET    | `/api/ll/:userid`              | Builds for a user (`all` for everyone)          |
+| POST   | `/api/ll/add/`                 | Create or update a build by `userid` and `name` |
+| GET    | `/api/ll/delete/:userid/:name` | Legacy delete endpoint                          |
+
+JSON and legacy text/plain JSON bodies are accepted for add/update. The existing
+LL build schema is unchanged; request examples and fixtures live in the LL app.
+
+## Cooking Compendium
+
+Create a separate Notion database with these exact property names and types:
+
+| Property       | Notion Type   | API Field                               |
+| -------------- | ------------- | --------------------------------------- |
+| `title`        | Title         | `name` (required on create)             |
+| `cover`        | Files & media | `coverUrl` on writes, `image` on reads  |
+| `description`  | Rich text     | `description`                           |
+| `ingredients`  | Rich text     | `ingredients` (newline-separated text)  |
+| `instructions` | Rich text     | `instructions` (newline-separated text) |
+| `source`       | Rich text     | `source`                                |
+| `category`     | Multi-select  | `category` (string array)               |
+| `cuisine`      | Multi-select  | `cuisine` (string array)                |
+| `tags`         | Multi-select  | `tags` (string array)                   |
+| `servings`     | Number        | `servings`                              |
+| `prepTime`     | Number        | `prepTime` (minutes)                    |
+| `cookTime`     | Number        | `cookTime` (minutes)                    |
+| `rating`       | Number        | `rating`                                |
+
+All fields except `name` are optional on create. Numbers must be non-negative;
+`null` clears them. Empty strings clear text/cover fields, and empty arrays clear
+tags. PATCH leaves unspecified fields unchanged. Long text is split into Notion's
+2,000-character rich-text chunks, up to 100 chunks per property.
+
+| Method | Route                            | Purpose                            |
+| ------ | -------------------------------- | ---------------------------------- |
+| GET    | `/api/recipes`                   | All recipes, sorted by title       |
+| GET    | `/api/recipes/search?name=pasta` | Search by title                    |
+| GET    | `/api/recipes/options`           | Category, cuisine, and tag options |
+| GET    | `/api/recipes/:id`               | Single recipe                      |
+| POST   | `/api/recipes`                   | Create recipe (write key required) |
+| PATCH  | `/api/recipes/:id`               | Edit recipe (write key required)   |
+| DELETE | `/api/recipes/:id`               | Trash recipe (write key required)  |
+
+```sh
+curl -X POST https://vector-express.netlify.app/api/recipes \
+  -H 'Content-Type: application/json' \
+  -H "x-api-key: $COOKING_COMPENDIUM_WRITE_KEY" \
+  -d '{"name":"Tomato pasta","ingredients":"200g pasta\n400g tomatoes","instructions":"Boil pasta.\nSimmer tomatoes.\nCombine.","category":["Dinner"],"servings":2,"cookTime":20}'
+```
+
+Writes without a valid key return `401`, invalid data returns `400`, missing or
+foreign/archived recipes return `404`, and missing Notion configuration returns
+`503`. Listing and search follow all Notion pagination cursors.

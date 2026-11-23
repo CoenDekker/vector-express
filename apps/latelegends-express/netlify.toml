@@ -1,0 +1,17 @@
+[build]
+  base = "apps/latelegends-express"
+  command = "npm run build"
+  functions = "functions"
+  publish = "dist"
+
+[functions]
+  node_bundler = "esbuild"
+
+[dev]
+  publish = "dist"
+
+[[redirects]]
+  force = true
+  from = "/api/*"
+  status = 200
+  to = "/.netlify/functions/api/:splat"
