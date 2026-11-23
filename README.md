@@ -101,16 +101,28 @@ the site's ID and environment variables and changes its default URL to
 `https://vector-express.netlify.app`. Renaming the npm package alone does not
 rename the live Netlify site.
 
-Authenticate and link this repository to that existing site once:
+Authenticate once, then deploy the combined root build to the existing site:
 
 ```sh
 npx netlify login
-npx netlify link --filter vector-express
+npx netlify sites:list --filter gamelist-express
 npm run deploy
 ```
 
 The root deploy command builds and publishes all three APIs in one deployment
-to the linked site. For CI, configure `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`.
+to the existing `vector-express` site. It selects the root `netlify.toml` rather
+than prompting for one of the three workspace apps. Do not run
+`netlify link --filter vector-express`: the root project is not an npm workspace,
+so that filter cannot match it. Linking is unnecessary because the deploy
+command selects the existing site explicitly. The filter on `sites:list` only
+avoids its workspace prompt; it does not select an app to deploy. Verify
+`vector-express` appears in the list. If deployment reports `Unauthorized:
+could not retrieve project`, check `npx netlify status`. An expired session
+requires `npx netlify logout --filter gamelist-express` followed by
+`npx netlify login` with the Netlify account that owns the site.
+You can also set `NETLIFY_SITE_ID` to the existing site's project ID to select it
+directly. For CI, configure `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID` with
+access to that site.
 For Git-connected deploys, keep the site's base and package directory at the
 repository root; the root Netlify configuration handles the combined build,
 functions, and `/api/*` rewrite. Do not select an app directory for this site.
@@ -183,30 +195,27 @@ Create a separate Notion database with these exact property names and types:
 
 | Property       | Notion Type   | API Field                               |
 | -------------- | ------------- | --------------------------------------- |
-| `title`        | Title         | `name` (required on create)             |
-| `cover`        | Files & media | `coverUrl` on writes, `image` on reads  |
-| `description`  | Rich text     | `description`                           |
+| `name`         | Title         | `name` (required on create)             |
+| `photo`        | Files & media | `photo` (HTTP(S) URL)                   |
 | `ingredients`  | Rich text     | `ingredients` (newline-separated text)  |
-| `instructions` | Rich text     | `instructions` (newline-separated text) |
-| `source`       | Rich text     | `source`                                |
-| `category`     | Multi-select  | `category` (string array)               |
-| `cuisine`      | Multi-select  | `cuisine` (string array)                |
+| `preparation`  | Rich text     | `preparation` (newline-separated steps) |
 | `tags`         | Multi-select  | `tags` (string array)                   |
-| `servings`     | Number        | `servings`                              |
-| `prepTime`     | Number        | `prepTime` (minutes)                    |
-| `cookTime`     | Number        | `cookTime` (minutes)                    |
-| `rating`       | Number        | `rating`                                |
+| `link`         | URL           | `link` (original recipe HTTP(S) URL)    |
 
-All fields except `name` are optional on create. Numbers must be non-negative;
-`null` clears them. Empty strings clear text/cover fields, and empty arrays clear
-tags. PATCH leaves unspecified fields unchanged. Long text is split into Notion's
+All fields except `name` are optional on create. Empty strings clear text, photo,
+and link fields; an empty array clears tags. PATCH leaves unspecified fields
+unchanged. Reads support both uploaded Notion files and external URLs in the
+`photo` property. A photo URL in a write replaces the property with an external
+image; omit `photo` when editing other fields to preserve uploaded files and
+avoid saving their expiring download URLs. The API does not upload image bytes.
+Long text is split into Notion's
 2,000-character rich-text chunks, up to 100 chunks per property.
 
 | Method | Route                            | Purpose                            |
 | ------ | -------------------------------- | ---------------------------------- |
 | GET    | `/api/recipes`                   | All recipes, sorted by title       |
 | GET    | `/api/recipes/search?name=pasta` | Search by title                    |
-| GET    | `/api/recipes/options`           | Category, cuisine, and tag options |
+| GET    | `/api/recipes/options`           | Tag options                        |
 | GET    | `/api/recipes/:id`               | Single recipe                      |
 | POST   | `/api/recipes`                   | Create recipe (write key required) |
 | PATCH  | `/api/recipes/:id`               | Edit recipe (write key required)   |
@@ -216,7 +225,7 @@ tags. PATCH leaves unspecified fields unchanged. Long text is split into Notion'
 curl -X POST https://vector-express.netlify.app/api/recipes \
   -H 'Content-Type: application/json' \
   -H "x-api-key: $COOKING_COMPENDIUM_WRITE_KEY" \
-  -d '{"name":"Tomato pasta","ingredients":"200g pasta\n400g tomatoes","instructions":"Boil pasta.\nSimmer tomatoes.\nCombine.","category":["Dinner"],"servings":2,"cookTime":20}'
+  -d '{"name":"Tomato pasta","ingredients":"200g pasta\n400g tomatoes","preparation":"Boil pasta.\nSimmer tomatoes.\nCombine.","tags":["Dinner"],"photo":"https://example.com/pasta.jpg","link":"https://example.com/recipe"}'
 ```
 
 Writes without a valid key return `401`, invalid data returns `400`, missing or

@@ -9,10 +9,12 @@ const cooking = require("../functions/api.cjs").handler;
 const recipeDatabase = "123456781234123412341234567890ab";
 const recipeKey = "test-recipe-key";
 const recipe = page(recipeDatabase, {
-    title: { title: [{ plain_text: "Pasta" }] },
+    name: { title: [{ plain_text: "Pasta" }] },
     ingredients: { rich_text: [{ plain_text: "Pasta\nTomatoes" }] },
-    category: { multi_select: [{ name: "Dinner" }] },
-    servings: { number: 2 },
+    preparation: { rich_text: [{ plain_text: "Boil pasta.\nSimmer sauce." }] },
+    tags: { multi_select: [{ name: "Dinner" }] },
+    photo: { files: [{ type: "file", file: { url: "https://notion.example/upload.jpg" } }] },
+    link: { url: "https://example.com/pasta" },
 });
 
 process.env.NOTION_COOKING_COMPENDIUM_TOKEN = "test-recipe-token";
@@ -52,7 +54,8 @@ test("recipe API returns 503 when configuration is missing", async () => {
 });
 
 test("recipe listing paginates and maps Notion properties", async () => {
-    notion().post(`/v1/databases/${recipeDatabase}/query`, (body) => !body.start_cursor)
+    notion().post(`/v1/databases/${recipeDatabase}/query`, (body) =>
+        !body.start_cursor && body.sorts[0].property === "name")
         .reply(200, { results: [recipe], next_cursor: testPageId });
     notion().post(`/v1/databases/${recipeDatabase}/query`, (body) => body.start_cursor === testPageId)
         .reply(200, { results: [], next_cursor: null });
@@ -60,20 +63,24 @@ test("recipe listing paginates and maps Notion properties", async () => {
     assert.equal(response.status, 200);
     assert.equal(response.body[0].name, "Pasta");
     assert.equal(response.body[0].ingredients, "Pasta\nTomatoes");
-    assert.deepEqual(response.body[0].category, ["Dinner"]);
-    assert.equal(response.body[0].servings, 2);
+    assert.deepEqual(response.body[0], {
+        id: testPageId, name: "Pasta", tags: ["Dinner"],
+        ingredients: "Pasta\nTomatoes", preparation: "Boil pasta.\nSimmer sauce.",
+        photo: "https://notion.example/upload.jpg", link: "https://example.com/pasta",
+    });
 });
 
 test("recipe search validates its query and options use the configured database", async () => {
     assert.equal((await request(cooking, "/api/recipes/search")).status, 400);
-    notion().post(`/v1/databases/${recipeDatabase}/query`, (body) => body.filter.title.contains === "Pasta")
+    notion().post(`/v1/databases/${recipeDatabase}/query`, (body) =>
+        body.filter.property === "name" && body.filter.title.contains === "Pasta")
         .reply(200, { results: [recipe], next_cursor: null });
     assert.equal((await request(cooking, "/api/recipes/search?name=Pasta")).body.length, 1);
 
     notion().get(`/v1/databases/${recipeDatabase}`).reply(200, {
-        properties: { category: { multi_select: { options: [{ name: "Dinner" }] } } },
+        properties: { tags: { multi_select: { options: [{ name: "Dinner" }] } } },
     });
-    assert.deepEqual((await request(cooking, "/api/recipes/options")).body.category, ["Dinner"]);
+    assert.deepEqual((await request(cooking, "/api/recipes/options")).body, { tags: ["Dinner"] });
 });
 
 test("recipe writes require the private API key", async () => {
@@ -85,15 +92,22 @@ test("recipe writes require the private API key", async () => {
 
 test("recipe creation validates input and chunks long ingredients for Notion", async () => {
     for (const body of [{}, { name: "" }, { name: "Pasta", unknown: true },
-        { name: "Pasta", cookTime: -1 }, { name: "Pasta", category: ["Dinner", " Dinner "] },
-        { name: "Pasta", coverUrl: "javascript:alert(1)" }]) {
+        { name: "Pasta", tags: "Dinner" }, { name: "Pasta", tags: ["Dinner", " Dinner "] },
+        { name: "Pasta", photo: "javascript:alert(1)" }, { name: "Pasta", link: "javascript:alert(1)" },
+        { name: "Pasta", preparation: ["Boil"] }]) {
         assert.equal((await request(cooking, "/api/recipes", "POST", body, recipeKey)).status, 400);
     }
     notion().post("/v1/pages", (body) => body.parent.database_id === recipeDatabase &&
+        body.properties.name.title[0].text.content === "Pasta" &&
+        body.properties.preparation.rich_text[0].text.content === "Boil" &&
+        body.properties.tags.multi_select[0].name === "Dinner" &&
+        body.properties.photo.files[0].external.url === "https://example.com/photo.jpg" &&
+        body.properties.link.url === "https://example.com/pasta" &&
         body.properties.ingredients.rich_text.length === 2 &&
         body.properties.ingredients.rich_text[0].text.content.length === 2000).reply(200, recipe);
     const result = await request(cooking, "/api/recipes", "POST", {
-        name: "Pasta", ingredients: "x".repeat(2001), category: ["Dinner"], servings: 2,
+        name: "Pasta", ingredients: "x".repeat(2001), preparation: "Boil", tags: ["Dinner"],
+        photo: "https://example.com/photo.jpg", link: "https://example.com/pasta",
     }, recipeKey);
     assert.equal(result.status, 201);
     assert.equal(result.body.name, "Pasta");
@@ -105,16 +119,32 @@ test("recipes can be read, patched, cleared, and deleted", async () => {
 
     notion().patch(`/v1/pages/${testPageId}`, {
         properties: {
-            description: { rich_text: [] }, category: { multi_select: [] },
-            servings: { number: null }, cover: { files: [] },
+            ingredients: { rich_text: [] }, preparation: { rich_text: [] },
+            tags: { multi_select: [] }, photo: { files: [] }, link: { url: null },
         },
     }).reply(200, recipe);
     assert.equal((await request(cooking, `/api/recipes/${testPageId}`, "PATCH", {
-        description: "", category: [], servings: null, coverUrl: "",
+        ingredients: "", preparation: "", tags: [], photo: "", link: "",
     }, recipeKey)).status, 200);
 
     notion().patch(`/v1/pages/${testPageId}`, { in_trash: true }).reply(200, { id: testPageId });
     assert.equal((await request(cooking, `/api/recipes/${testPageId}`, "DELETE", undefined, recipeKey)).body.deleted, true);
+});
+
+test("editing text leaves uploaded photos untouched and reads external photo URLs", async () => {
+    const updated = {
+        ...recipe, properties: {
+            ...recipe.properties,
+            photo: { files: [{ type: "external", external: { url: "https://example.com/photo.jpg" } }] },
+        },
+    };
+    notion().get(`/v1/pages/${testPageId}`).reply(200, recipe);
+    notion().patch(`/v1/pages/${testPageId}`, {
+        properties: { preparation: { rich_text: [{ text: { content: "Boil\nServe" } }] } },
+    }).reply(200, updated);
+    const result = await request(cooking, `/api/recipes/${testPageId}`, "PATCH", { preparation: "Boil\nServe" }, recipeKey);
+    assert.equal(result.status, 200);
+    assert.equal(result.body.photo, "https://example.com/photo.jpg");
 });
 
 test("recipe reads and writes reject foreign or archived pages", async () => {

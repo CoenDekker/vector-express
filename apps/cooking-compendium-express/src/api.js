@@ -5,10 +5,8 @@ import { Client } from "@notionhq/client";
 
 const api = express();
 const router = Router();
-const textFields = ["description", "ingredients", "instructions", "source"];
-const tagFields = ["category", "cuisine", "tags"];
-const numberFields = ["servings", "prepTime", "cookTime", "rating"];
-const fields = ["name", "coverUrl", ...textFields, ...tagFields, ...numberFields];
+const textFields = ["ingredients", "preparation"];
+const fields = ["name", "tags", ...textFields, "photo", "link"];
 
 api.use(cors());
 api.use("/api", router);
@@ -31,17 +29,13 @@ function getRecipe(page) {
     const properties = page.properties || {};
     const recipe = {
         id: page.id,
-        name: properties.title?.title?.map((text) => text.plain_text).join("") || "",
-        image: properties.cover?.files?.[0]?.external?.url || properties.cover?.files?.[0]?.file?.url || "",
+        name: properties.name?.title?.map((text) => text.plain_text).join("") || "",
+        tags: properties.tags?.multi_select?.map((option) => option.name) || [],
+        photo: properties.photo?.files?.[0]?.external?.url || properties.photo?.files?.[0]?.file?.url || "",
+        link: properties.link?.url || "",
     };
     for (const field of textFields) {
         recipe[field] = properties[field]?.rich_text?.map((text) => text.plain_text).join("") || "";
-    }
-    for (const field of tagFields) {
-        recipe[field] = properties[field]?.multi_select?.map((option) => option.name) || [];
-    }
-    for (const field of numberFields) {
-        recipe[field] = properties[field]?.number ?? null;
     }
     return recipe;
 }
@@ -56,26 +50,24 @@ function getProperties(changes, creating = false) {
     }
     const properties = {};
     for (const [field, value] of Object.entries(changes)) {
-        if (numberFields.includes(field)) {
-            if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
-                throw new Error(`${field} must be a non-negative number or null.`);
-            }
-            properties[field] = { number: value };
-        } else if (tagFields.includes(field)) {
-            if (!Array.isArray(value) || value.some((tag) => typeof tag !== "string" || !tag.trim()) ||
+        if (field === "tags") {
+            if (!Array.isArray(value) || value.length > 100 ||
+                value.some((tag) => typeof tag !== "string" || !tag.trim() || tag.length > 100) ||
                 new Set(value.map((tag) => tag.trim())).size !== value.length) {
-                throw new Error(`${field} must be an array of unique non-empty strings.`);
+                throw new Error("tags must contain up to 100 unique non-empty strings (100 characters max each).");
             }
             properties[field] = { multi_select: value.map((name) => ({ name: name.trim() })) };
-        } else if (field === "coverUrl") {
-            if (typeof value !== "string") throw new Error("coverUrl must be an HTTP(S) URL or an empty string.");
+        } else if (field === "photo" || field === "link") {
+            if (typeof value !== "string" || value.length > 2000) throw new Error(`${field} must be an HTTP(S) URL or an empty string.`);
             if (!value) {
-                properties.cover = { files: [] };
+                properties[field] = field === "photo" ? { files: [] } : { url: null };
             } else {
                 let url;
-                try { url = new URL(value); } catch { throw new Error("coverUrl must be an HTTP(S) URL."); }
-                if (!["http:", "https:"].includes(url.protocol)) throw new Error("coverUrl must be an HTTP(S) URL.");
-                properties.cover = { files: [{ name: "cover", type: "external", external: { url: url.href } }] };
+                try { url = new URL(value); } catch { throw new Error(`${field} must be an HTTP(S) URL.`); }
+                if (!["http:", "https:"].includes(url.protocol)) throw new Error(`${field} must be an HTTP(S) URL.`);
+                properties[field] = field === "photo"
+                    ? { files: [{ name: "photo", type: "external", external: { url: url.href } }] }
+                    : { url: url.href };
             }
         } else {
             if (typeof value !== "string" || (field === "name" && !value.trim())) {
@@ -88,7 +80,7 @@ function getProperties(changes, creating = false) {
                 chunks.push({ text: { content: content.slice(offset, offset + 2000) } });
             }
             if (chunks.length > 100) throw new Error(`${field} is too long.`);
-            properties[field === "name" ? "title" : field] = { [type]: chunks };
+            properties[field] = { [type]: chunks };
         }
     }
     return properties;
@@ -106,9 +98,9 @@ async function listRecipes(req, res, next) {
                 database_id: res.locals.databaseId,
                 page_size: 100,
                 start_cursor: cursor,
-                sorts: [{ property: "title", direction: "ascending" }],
+                sorts: [{ property: "name", direction: "ascending" }],
                 ...(req.path === "/recipes/search"
-                    ? { filter: { property: "title", title: { contains: req.query.name.trim() } } } : {}),
+                    ? { filter: { property: "name", title: { contains: req.query.name.trim() } } } : {}),
             });
             recipes.push(...page.results.map(getRecipe));
             cursor = page.next_cursor;
@@ -141,9 +133,9 @@ router.get("/recipes/search", listRecipes);
 router.get("/recipes/options", async (req, res, next) => {
     try {
         const database = await res.locals.notion.databases.retrieve({ database_id: res.locals.databaseId });
-        res.set("Cache-Control", "public, max-age=300").json(Object.fromEntries(
-            tagFields.map((field) => [field, database.properties?.[field]?.multi_select?.options?.map((option) => option.name) || []])
-        ));
+        res.set("Cache-Control", "public, max-age=300").json({
+            tags: database.properties?.tags?.multi_select?.options?.map((option) => option.name) || [],
+        });
     } catch (error) {
         next(error);
     }
