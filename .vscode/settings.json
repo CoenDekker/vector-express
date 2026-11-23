@@ -1,0 +1,54 @@
+{
+	"typescript.updateImportsOnFileMove.enabled": "always",
+	"javascript.updateImportsOnFileMove.enabled": "always",
+	"typescript.preferences.importModuleSpecifier": "relative",
+	"typescript.preferences.quoteStyle": "single",
+	"javascript.preferences.quoteStyle": "single",
+	"html.format.wrapAttributes": "force",
+	"[json]": {
+		"editor.defaultFormatter": "esbenp.prettier-vscode"
+	},
+	"[html]": {
+		"editor.defaultFormatter": "vscode.html-language-features"
+	},
+	"[markdown]": {
+		"editor.defaultFormatter": null
+	},
+	"editor.formatOnSave": true,
+	"editor.codeActionsOnSave": {
+		"source.fixAll.tslint": "explicit",
+		"source.fixAll.eslint": "explicit"
+	},
+	"workbench.colorCustomizations": {
+		"editor.background": "#081a2b",
+		"editorGutter.background": "#081a2b",
+		"activityBar.background": "#102b45",
+		"activityBar.activeBorder": "#e7e7e7",
+		"activityBar.foreground": "#e7e7e7",
+		"activityBar.inactiveForeground": "#e7e7e799",
+		"activityBarBadge.background": "#7f2060",
+		"activityBarBadge.foreground": "#e7e7e7",
+		"titleBar.activeBackground": "#0b1d30",
+		"titleBar.inactiveBackground": "#0b1d3099",
+		"titleBar.activeForeground": "#e7e7e7",
+		"titleBar.inactiveForeground": "#e7e7e799",
+		"statusBar.background": "#0b1d30",
+		"statusBarItem.hoverBackground": "#102b45",
+		"statusBar.foreground": "#e7e7e7",
+		"activityBar.activeBackground": "#102b45",
+		"sash.hoverBorder": "#102b45",
+		"statusBarItem.remoteBackground": "#4c1339",
+		"statusBarItem.remoteForeground": "#e7e7e7",
+		"activityBarTop.activeBackground": "#102b45",
+		"activityBarTop.activeBorder": "#e7e7e7",
+		"activityBarTop.background": "#102b45",
+		"activityBarTop.foreground": "#e7e7e7",
+		"activityBarTop.inactiveForeground": "#e7e7e799",
+		"commandCenter.border": "#e7e7e799",
+		"commandCenter.foreground": "#e7e7e7",
+		"statusBar.debuggingBackground": "#0b1d30",
+		"statusBar.debuggingForeground": "#e7e7e7",
+		"statusBar.inactiveBackground": "#0b1d30"
+	},
+	"peacock.color": "#0b1d30"
+}
