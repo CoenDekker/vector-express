@@ -231,3 +231,6 @@ curl -X POST https://vector-express.netlify.app/api/recipes \
 Writes without a valid key return `401`, invalid data returns `400`, missing or
 foreign/archived recipes return `404`, and missing Notion configuration returns
 `503`. Listing and search follow all Notion pagination cursors.
+Notion validation failures return `400` with `error` and `details`; the latter
+contains Notion's diagnostic for identifying an incorrect property name or type.
+The same diagnostic is logged in Netlify Functions.

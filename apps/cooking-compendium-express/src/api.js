@@ -182,8 +182,12 @@ router.delete("/recipes/:id", loadRecipe, async (req, res, next) => {
 });
 
 api.use((error, req, res, next) => {
-    if (error.type === "entity.parse.failed" || error.code === "validation_error") {
+    if (error.type === "entity.parse.failed") {
         return res.status(400).json({ error: "Invalid recipe details." });
+    }
+    if (error.code === "validation_error") {
+        console.error("Notion rejected Cooking Compendium request:", error.message);
+        return res.status(400).json({ error: "Invalid recipe details.", details: error.message });
     }
     console.error("Cooking Compendium request failed", error);
     res.status(500).json({ error: "Unable to process Cooking Compendium request." });

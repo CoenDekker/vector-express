@@ -162,5 +162,16 @@ test("malformed JSON and missing recipes return client errors", async () => {
     notion().get(`/v1/pages/${testPageId}`).reply(404, {
         object: "error", status: 404, code: "object_not_found", message: "Not found",
     });
+
     assert.equal((await request(cooking, `/api/recipes/${testPageId}`)).status, 404);
+});
+
+test("Notion validation failures include the diagnostic needed to fix a rejected edit", async () => {
+    const message = "link is not a property that exists.";
+    notion().get(`/v1/pages/${testPageId}`).reply(200, recipe);
+    notion().patch(`/v1/pages/${testPageId}`, { properties: { link: { url: null } } })
+        .reply(400, { object: "error", status: 400, code: "validation_error", message });
+    const result = await request(cooking, `/api/recipes/${testPageId}`, "PATCH", { link: "" }, recipeKey);
+    assert.equal(result.status, 400);
+    assert.deepEqual(result.body, { error: "Invalid recipe details.", details: message });
 });
