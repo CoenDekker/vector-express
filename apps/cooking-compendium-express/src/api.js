@@ -172,6 +172,44 @@ router.patch("/recipes/:id", express.json(), validateRecipe(false), loadRecipe, 
         next(error);
     }
 });
+router.delete("/recipes/tags/:tag", async (req, res) => {
+    const tag = req.params.tag.trim();
+    if (!tag || tag.length > 100) return res.status(400).json({ error: "A tag name is required (100 characters max)." });
+    const notion = res.locals.notion;
+    const databaseId = res.locals.databaseId;
+    let updated = 0;
+    try {
+        const database = await notion.databases.retrieve({ database_id: databaseId });
+        const options = database.properties?.tags?.multi_select?.options || [];
+        const option = options.find((entry) => entry.name.toLocaleLowerCase() === tag.toLocaleLowerCase());
+        if (!option) return res.status(404).json({ error: "Tag not found." });
+        const pages = [];
+        let cursor;
+        do {
+            const result = await notion.databases.query({
+                database_id: databaseId, page_size: 100, start_cursor: cursor,
+                filter: { property: "tags", multi_select: { contains: option.name } },
+            });
+            pages.push(...result.results);
+            cursor = result.next_cursor;
+        } while (cursor);
+        for (const page of pages) {
+            const tags = (page.properties?.tags?.multi_select || [])
+                .filter((entry) => entry.name.toLocaleLowerCase() !== option.name.toLocaleLowerCase())
+                .map((entry) => entry.id ? { id: entry.id } : { name: entry.name });
+            await notion.pages.update({ page_id: page.id, properties: { tags: { multi_select: tags } } });
+            updated++;
+        }
+        const current = await notion.databases.retrieve({ database_id: databaseId });
+        const remaining = (current.properties?.tags?.multi_select?.options || [])
+            .filter((entry) => entry.name.toLocaleLowerCase() !== option.name.toLocaleLowerCase());
+        await notion.databases.update({ database_id: databaseId, properties: { tags: { multi_select: { options: remaining } } } });
+        res.set("Cache-Control", "no-store").json({ tag: option.name, deleted: true, updated, tags: remaining.map((entry) => entry.name) });
+    } catch (error) {
+        console.error("Cooking Compendium tag removal failed:", error.message);
+        res.status(502).json({ error: `Tag removal stopped after updating ${updated} recipes. Some recipes may still have the tag. Retry to finish removing it.`, updated, deleted: false });
+    }
+});
 router.delete("/recipes/:id", loadRecipe, async (req, res, next) => {
     try {
         await res.locals.notion.pages.update({ page_id: req.params.id, in_trash: true });

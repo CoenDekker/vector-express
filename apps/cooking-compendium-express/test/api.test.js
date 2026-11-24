@@ -84,17 +84,49 @@ test("recipe search validates its query and options use the configured database"
 });
 
 test("recipe writes require the private API key", async () => {
-    for (const [method, path] of [["POST", "/api/recipes"], ["PATCH", `/api/recipes/${testPageId}`], ["DELETE", `/api/recipes/${testPageId}`]]) {
+    for (const [method, path] of [["POST", "/api/recipes"], ["PATCH", `/api/recipes/${testPageId}`], ["DELETE", `/api/recipes/${testPageId}`], ["DELETE", "/api/recipes/tags/Dinner"]]) {
         assert.equal((await request(cooking, path, method, {})).status, 401);
         assert.equal((await request(cooking, path, method, {}, "wrong-key")).status, 401);
     }
 });
 
+test("tag removal updates every page before removing the option and leaves recipes intact", async () => {
+    const otherId = "abcdefab123412341234abcdefabcdef";
+    const options = [{ id: "dinner", name: "Dinner", color: "green" }, { id: "easy", name: "Easy", color: "blue" }];
+    notion().get(`/v1/databases/${recipeDatabase}`).times(2).reply(200, { properties: { tags: { multi_select: { options } } } });
+    notion().post(`/v1/databases/${recipeDatabase}/query`, (body) => !body.start_cursor && body.filter.multi_select.contains === "Dinner")
+        .reply(200, { results: [{ ...recipe, properties: { ...recipe.properties, tags: { multi_select: options } } }], next_cursor: otherId });
+    notion().post(`/v1/databases/${recipeDatabase}/query`, (body) => body.start_cursor === otherId)
+        .reply(200, { results: [{ ...recipe, id: otherId }], next_cursor: null });
+    notion().patch(`/v1/pages/${testPageId}`, { properties: { tags: { multi_select: [{ id: "easy" }] } } }).reply(200, recipe);
+    notion().patch(`/v1/pages/${otherId}`, { properties: { tags: { multi_select: [] } } }).reply(200, recipe);
+    notion().patch(`/v1/databases/${recipeDatabase}`, { properties: { tags: { multi_select: { options: [options[1]] } } } }).reply(200, {});
+    const result = await request(combined, "/api/recipes/tags/dinner", "DELETE", undefined, recipeKey);
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { tag: "Dinner", deleted: true, updated: 2, tags: ["Easy"] });
+});
+
+test("tag removal validates names and stops without removing the option on a recipe failure", async () => {
+    for (const tag of ["%20", "a".repeat(101)]) {
+        assert.equal((await request(cooking, `/api/recipes/tags/${tag}`, "DELETE", undefined, recipeKey)).status, 400);
+    }
+    notion().get(`/v1/databases/${recipeDatabase}`).reply(200, { properties: { tags: { multi_select: { options: [] } } } });
+    assert.equal((await request(cooking, "/api/recipes/tags/Missing", "DELETE", undefined, recipeKey)).status, 404);
+    notion().get(`/v1/databases/${recipeDatabase}`).reply(200, { properties: { tags: { multi_select: { options: [{ name: "Dinner" }] } } } });
+    notion().post(`/v1/databases/${recipeDatabase}/query`).reply(200, { results: [recipe], next_cursor: null });
+    notion().patch(`/v1/pages/${testPageId}`).reply(400, { object: "error", status: 400, code: "validation_error", message: "Rejected" });
+    const result = await request(cooking, "/api/recipes/tags/Dinner", "DELETE", undefined, recipeKey);
+    assert.equal(result.status, 502);
+    assert.equal(result.body.deleted, false);
+    assert.equal(result.body.updated, 0);
+    assert.match(result.body.error, /Retry/);
+});
+
 test("recipe creation validates input and chunks long ingredients for Notion", async () => {
     for (const body of [{}, { name: "" }, { name: "Pasta", unknown: true },
-        { name: "Pasta", tags: "Dinner" }, { name: "Pasta", tags: ["Dinner", " Dinner "] },
-        { name: "Pasta", photo: "javascript:alert(1)" }, { name: "Pasta", link: "javascript:alert(1)" },
-        { name: "Pasta", preparation: ["Boil"] }]) {
+    { name: "Pasta", tags: "Dinner" }, { name: "Pasta", tags: ["Dinner", " Dinner "] },
+    { name: "Pasta", photo: "javascript:alert(1)" }, { name: "Pasta", link: "javascript:alert(1)" },
+    { name: "Pasta", preparation: ["Boil"] }]) {
         assert.equal((await request(cooking, "/api/recipes", "POST", body, recipeKey)).status, 400);
     }
     notion().post("/v1/pages", (body) => body.parent.database_id === recipeDatabase &&

@@ -193,14 +193,14 @@ LL build schema is unchanged; request examples and fixtures live in the LL app.
 
 Create a separate Notion database with these exact property names and types:
 
-| Property       | Notion Type   | API Field                               |
-| -------------- | ------------- | --------------------------------------- |
-| `name`         | Title         | `name` (required on create)             |
-| `photo`        | Files & media | `photo` (HTTP(S) URL)                   |
-| `ingredients`  | Rich text     | `ingredients` (newline-separated text)  |
-| `preparation`  | Rich text     | `preparation` (newline-separated steps) |
-| `tags`         | Multi-select  | `tags` (string array)                   |
-| `link`         | URL           | `link` (original recipe HTTP(S) URL)    |
+| Property      | Notion Type   | API Field                               |
+| ------------- | ------------- | --------------------------------------- |
+| `name`        | Title         | `name` (required on create)             |
+| `photo`       | Files & media | `photo` (HTTP(S) URL)                   |
+| `ingredients` | Rich text     | `ingredients` (newline-separated text)  |
+| `preparation` | Rich text     | `preparation` (newline-separated steps) |
+| `tags`        | Multi-select  | `tags` (string array)                   |
+| `link`        | URL           | `link` (original recipe HTTP(S) URL)    |
 
 All fields except `name` are optional on create. Empty strings clear text, photo,
 and link fields; an empty array clears tags. PATCH leaves unspecified fields
@@ -211,15 +211,24 @@ avoid saving their expiring download URLs. The API does not upload image bytes.
 Long text is split into Notion's
 2,000-character rich-text chunks, up to 100 chunks per property.
 
-| Method | Route                            | Purpose                            |
-| ------ | -------------------------------- | ---------------------------------- |
-| GET    | `/api/recipes`                   | All recipes, sorted by title       |
-| GET    | `/api/recipes/search?name=pasta` | Search by title                    |
-| GET    | `/api/recipes/options`           | Tag options                        |
-| GET    | `/api/recipes/:id`               | Single recipe                      |
-| POST   | `/api/recipes`                   | Create recipe (write key required) |
-| PATCH  | `/api/recipes/:id`               | Edit recipe (write key required)   |
-| DELETE | `/api/recipes/:id`               | Trash recipe (write key required)  |
+| Method | Route                            | Purpose                                                               |
+| ------ | -------------------------------- | --------------------------------------------------------------------- |
+| GET    | `/api/recipes`                   | All recipes, sorted by title                                          |
+| GET    | `/api/recipes/search?name=pasta` | Search by title                                                       |
+| GET    | `/api/recipes/options`           | Tag options                                                           |
+| GET    | `/api/recipes/:id`               | Single recipe                                                         |
+| POST   | `/api/recipes`                   | Create recipe (write key required)                                    |
+| PATCH  | `/api/recipes/:id`               | Edit recipe (write key required)                                      |
+| DELETE | `/api/recipes/:id`               | Trash recipe (write key required)                                     |
+| DELETE | `/api/recipes/tags/:tag`         | Remove tag from all recipes and database options (write key required) |
+
+Tag removal matches the option name case-insensitively and paginates all
+matching recipes before updating only their `tags` property. Recipes and their
+other fields are never archived or replaced. Once all page updates succeed,
+the tag option is removed from the database. Success returns `{ tag, deleted,
+updated, tags }`, where `tags` are the remaining database option names. A failure
+returns 502 with an error and the number already updated; the tag option is kept
+until page updates finish, allowing a retry. A missing tag returns 404.
 
 ```sh
 curl -X POST https://vector-express.netlify.app/api/recipes \
