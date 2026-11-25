@@ -11,6 +11,7 @@ const gameKey = "test-game-key";
 const gamePage = page(gameDatabase, {
     title: { title: [{ plain_text: "Rayman" }] },
     status: { type: "multi_select", multi_select: [{ name: "queued" }] },
+    platform: { type: "multi_select", multi_select: [{ name: "PC" }, { name: "Switch" }] },
 });
 
 process.env.NOTION_GAMELIST_TOKEN = "test-game-token";
@@ -51,6 +52,7 @@ test("game search and read retain their response shape", async () => {
     assert.equal(result.status, 200);
     assert.equal(result.body[0].name, "Rayman");
     assert.deepEqual(result.body[0].status, ["queued"]);
+    assert.equal(result.body[0].platform, "PC, Switch");
 
     notion().get(`/v1/pages/${testPageId}`).reply(200, gamePage);
     assert.equal((await request(game, `/api/gamelist/game/${testPageId}`)).body.name, "Rayman");

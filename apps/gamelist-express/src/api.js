@@ -464,7 +464,7 @@ function getGameObject(gamedata) {
       gamedata.properties?.cover?.files?.[0]?.file?.url ||
       gamedata.properties?.cover?.files?.[0]?.name || "",
     name: gamedata.properties?.title?.title?.[0]?.plain_text || "",
-    platform: gamedata.properties?.platform?.multi_select?.[0]?.name || "",
+    platform: gamedata.properties?.platform?.multi_select?.map((platform) => platform.name).join(", ") || "",
     developer: gamedata.properties?.developer?.rich_text?.map((text) => text.plain_text).join("") || "",
     release: gamedata.properties?.release?.rich_text?.map((text) => text.plain_text).join("") || "",
     completed: gamedata.properties?.completed?.checkbox ?? false,
