@@ -198,6 +198,7 @@ Create a separate Notion database with these exact property names and types:
 | `name`        | Title         | `name` (required on create)             |
 | `author`      | Select        | `author` (`"his"`, `"hers"`, or `""`)   |
 | `verified`    | Checkbox      | `verified` (boolean)                    |
+| `private`     | Checkbox      | `private` (boolean, defaults to false)  |
 | `photo`       | Files & media | `photo` (HTTP(S) URL)                   |
 | `ingredients` | Rich text     | `ingredients` (newline-separated text)  |
 | `preparation` | Rich text     | `preparation` (newline-separated steps) |
@@ -215,6 +216,14 @@ image; omit `photo` when editing other fields to preserve uploaded files and
 avoid saving their expiring download URLs. The API does not upload image bytes.
 Long text is split into Notion's
 2,000-character rich-text chunks, up to 100 chunks per property.
+
+Public list and search responses omit recipes with `private` checked. Public
+`GET /api/recipes/:id` returns 404 for private recipes. Supplying the valid
+server-side `COOKING_COMPENDIUM_WRITE_KEY` as `x-api-key` includes private
+recipes on reads; never expose this key in browser code. The website verifies
+Netlify Identity in its own read proxy before making keyed requests. Recipe
+responses use `Cache-Control: no-store`. The `private` field accepts only JSON
+booleans on writes, and omitted PATCH fields remain unchanged.
 
 | Method | Route                            | Purpose                                                               |
 | ------ | -------------------------------- | --------------------------------------------------------------------- |
