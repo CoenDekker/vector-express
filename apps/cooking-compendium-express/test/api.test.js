@@ -10,6 +10,8 @@ const recipeDatabase = "123456781234123412341234567890ab";
 const recipeKey = "test-recipe-key";
 const recipe = page(recipeDatabase, {
     name: { title: [{ plain_text: "Pasta" }] },
+    author: { select: { name: "hers" } },
+    verified: { checkbox: true },
     ingredients: { rich_text: [{ plain_text: "Pasta\nTomatoes" }] },
     preparation: { rich_text: [{ plain_text: "Boil pasta.\nSimmer sauce." }] },
     tags: { multi_select: [{ name: "Dinner" }] },
@@ -65,6 +67,7 @@ test("recipe listing paginates and maps Notion properties", async () => {
     assert.equal(response.body[0].ingredients, "Pasta\nTomatoes");
     assert.deepEqual(response.body[0], {
         id: testPageId, name: "Pasta", tags: ["Dinner"],
+        author: "hers", verified: true, private: false,
         ingredients: "Pasta\nTomatoes", preparation: "Boil pasta.\nSimmer sauce.",
         photo: "https://notion.example/upload.jpg", link: "https://example.com/pasta",
     });
@@ -81,6 +84,72 @@ test("recipe search validates its query and options use the configured database"
         properties: { tags: { multi_select: { options: [{ name: "Dinner" }] } } },
     });
     assert.deepEqual((await request(cooking, "/api/recipes/options")).body, { tags: ["Dinner"] });
+});
+
+test("private recipes require the server key on lists, searches, and direct reads", async () => {
+    const privateRecipe = { ...recipe, properties: { ...recipe.properties, private: { checkbox: true } } };
+    for (const key of [undefined, "wrong-key", recipeKey]) {
+        for (const path of ["/api/recipes", "/api/recipes/search?name=Pasta"]) {
+            notion().post(`/v1/databases/${recipeDatabase}/query`)
+                .reply(200, { results: [recipe], next_cursor: testPageId });
+            notion().post(`/v1/databases/${recipeDatabase}/query`)
+                .reply(200, { results: [privateRecipe], next_cursor: null });
+            const result = await request(combined, path, "GET", undefined, key);
+            assert.equal(result.status, 200);
+            assert.equal(result.body.length, key === recipeKey ? 2 : 1);
+        }
+        notion().get(`/v1/pages/${testPageId}`).reply(200, privateRecipe);
+        const result = await request(cooking, `/api/recipes/${testPageId}`, "GET", undefined, key);
+        assert.equal(result.status, key === recipeKey ? 200 : 404);
+        if (key === recipeKey) assert.equal(result.body.private, true);
+    }
+});
+
+test("private is a boolean Notion checkbox and can be cleared independently", async () => {
+    for (const value of ["true", 1, null]) {
+        assert.equal((await request(cooking, "/api/recipes", "POST", { name: "Soup", private: value }, recipeKey)).status, 400);
+    }
+    for (const value of [true, false]) {
+        notion().get(`/v1/pages/${testPageId}`).reply(200, recipe);
+        notion().patch(`/v1/pages/${testPageId}`, { properties: { private: { checkbox: value } } })
+            .reply(200, { ...recipe, properties: { ...recipe.properties, private: { checkbox: value } } });
+        const result = await request(cooking, `/api/recipes/${testPageId}`, "PATCH", { private: value }, recipeKey);
+        assert.equal(result.status, 200);
+        assert.equal(result.body.private, value);
+    }
+});
+
+test("recipe reads default missing author and verified properties", async () => {
+    notion().get(`/v1/pages/${testPageId}`).reply(200, page(recipeDatabase, {
+        name: { title: [{ plain_text: "Soup" }] },
+    }));
+    const result = await request(cooking, `/api/recipes/${testPageId}`);
+    assert.equal(result.status, 200);
+    assert.equal(result.body.author, "");
+    assert.equal(result.body.verified, false);
+});
+
+test("recipe author and verified can be updated independently", async () => {
+    for (const author of ["his", "hers"]) {
+        notion().get(`/v1/pages/${testPageId}`).reply(200, recipe);
+        notion().patch(`/v1/pages/${testPageId}`, {
+            properties: { author: { select: { name: author } } },
+        }).reply(200, { ...recipe, properties: { ...recipe.properties, author: { select: { name: author } } } });
+        const result = await request(cooking, `/api/recipes/${testPageId}`, "PATCH", { author }, recipeKey);
+        assert.equal(result.status, 200);
+        assert.equal(result.body.author, author);
+        assert.equal(result.body.verified, true);
+    }
+    for (const verified of [false, true]) {
+        notion().get(`/v1/pages/${testPageId}`).reply(200, recipe);
+        notion().patch(`/v1/pages/${testPageId}`, {
+            properties: { verified: { checkbox: verified } },
+        }).reply(200, { ...recipe, properties: { ...recipe.properties, verified: { checkbox: verified } } });
+        const result = await request(cooking, `/api/recipes/${testPageId}`, "PATCH", { verified }, recipeKey);
+        assert.equal(result.status, 200);
+        assert.equal(result.body.verified, verified);
+        assert.equal(result.body.author, "hers");
+    }
 });
 
 test("recipe writes require the private API key", async () => {
@@ -126,11 +195,15 @@ test("recipe creation validates input and chunks long ingredients for Notion", a
     for (const body of [{}, { name: "" }, { name: "Pasta", unknown: true },
     { name: "Pasta", tags: "Dinner" }, { name: "Pasta", tags: ["Dinner", " Dinner "] },
     { name: "Pasta", photo: "javascript:alert(1)" }, { name: "Pasta", link: "javascript:alert(1)" },
+    { name: "Pasta", author: "other" }, { name: "Pasta", author: null },
+    { name: "Pasta", verified: "false" }, { name: "Pasta", verified: 0 },
     { name: "Pasta", preparation: ["Boil"] }]) {
         assert.equal((await request(cooking, "/api/recipes", "POST", body, recipeKey)).status, 400);
     }
     notion().post("/v1/pages", (body) => body.parent.database_id === recipeDatabase &&
         body.properties.name.title[0].text.content === "Pasta" &&
+        body.properties.author.select.name === "hers" &&
+        body.properties.verified.checkbox === true &&
         body.properties.preparation.rich_text[0].text.content === "Boil" &&
         body.properties.tags.multi_select[0].name === "Dinner" &&
         body.properties.photo.files[0].external.url === "https://example.com/photo.jpg" &&
@@ -139,6 +212,7 @@ test("recipe creation validates input and chunks long ingredients for Notion", a
         body.properties.ingredients.rich_text[0].text.content.length === 2000).reply(200, recipe);
     const result = await request(cooking, "/api/recipes", "POST", {
         name: "Pasta", ingredients: "x".repeat(2001), preparation: "Boil", tags: ["Dinner"],
+        author: "hers", verified: true,
         photo: "https://example.com/photo.jpg", link: "https://example.com/pasta",
     }, recipeKey);
     assert.equal(result.status, 201);
@@ -152,11 +226,13 @@ test("recipes can be read, patched, cleared, and deleted", async () => {
     notion().patch(`/v1/pages/${testPageId}`, {
         properties: {
             ingredients: { rich_text: [] }, preparation: { rich_text: [] },
+            author: { select: null }, verified: { checkbox: false },
             tags: { multi_select: [] }, photo: { files: [] }, link: { url: null },
         },
     }).reply(200, recipe);
     assert.equal((await request(cooking, `/api/recipes/${testPageId}`, "PATCH", {
         ingredients: "", preparation: "", tags: [], photo: "", link: "",
+        author: "", verified: false,
     }, recipeKey)).status, 200);
 
     notion().patch(`/v1/pages/${testPageId}`, { in_trash: true }).reply(200, { id: testPageId });

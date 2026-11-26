@@ -196,6 +196,8 @@ Create a separate Notion database with these exact property names and types:
 | Property      | Notion Type   | API Field                               |
 | ------------- | ------------- | --------------------------------------- |
 | `name`        | Title         | `name` (required on create)             |
+| `author`      | Select        | `author` (`"his"`, `"hers"`, or `""`)   |
+| `verified`    | Checkbox      | `verified` (boolean)                    |
 | `photo`       | Files & media | `photo` (HTTP(S) URL)                   |
 | `ingredients` | Rich text     | `ingredients` (newline-separated text)  |
 | `preparation` | Rich text     | `preparation` (newline-separated steps) |
@@ -203,7 +205,10 @@ Create a separate Notion database with these exact property names and types:
 | `link`        | URL           | `link` (original recipe HTTP(S) URL)    |
 
 All fields except `name` are optional on create. Empty strings clear text, photo,
-and link fields; an empty array clears tags. PATCH leaves unspecified fields
+link, and author fields; an empty array clears tags. `author` accepts only `"his"`,
+`"hers"`, or `""` (clears the Notion select). `verified` accepts only JSON booleans;
+`false` clears the checkbox. Missing values read as `author: ""` and
+`verified: false`. PATCH leaves unspecified fields
 unchanged. Reads support both uploaded Notion files and external URLs in the
 `photo` property. A photo URL in a write replaces the property with an external
 image; omit `photo` when editing other fields to preserve uploaded files and

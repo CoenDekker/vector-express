@@ -6,12 +6,15 @@ import { Client } from "@notionhq/client";
 const api = express();
 const router = Router();
 const textFields = ["ingredients", "preparation"];
-const fields = ["name", "tags", ...textFields, "photo", "link"];
+const fields = ["name", "author", "verified", "private", "tags", ...textFields, "photo", "link"];
 
 api.use(cors());
 api.use("/api", router);
 router.get("/hello", (req, res) => res.send("Hello World!"));
 router.use("/recipes", (req, res, next) => {
+    res.set("Cache-Control", "no-store");
+    res.locals.includePrivate = Boolean(process.env.COOKING_COMPENDIUM_WRITE_KEY &&
+        req.get("x-api-key") === process.env.COOKING_COMPENDIUM_WRITE_KEY);
     if (["POST", "PATCH", "DELETE"].includes(req.method) &&
         (!process.env.COOKING_COMPENDIUM_WRITE_KEY ||
             req.get("x-api-key") !== process.env.COOKING_COMPENDIUM_WRITE_KEY)) {
@@ -30,6 +33,9 @@ function getRecipe(page) {
     const recipe = {
         id: page.id,
         name: properties.name?.title?.map((text) => text.plain_text).join("") || "",
+        author: properties.author?.select?.name || "",
+        verified: properties.verified?.checkbox === true,
+        private: properties.private?.checkbox === true,
         tags: properties.tags?.multi_select?.map((option) => option.name) || [],
         photo: properties.photo?.files?.[0]?.external?.url || properties.photo?.files?.[0]?.file?.url || "",
         link: properties.link?.url || "",
@@ -50,7 +56,13 @@ function getProperties(changes, creating = false) {
     }
     const properties = {};
     for (const [field, value] of Object.entries(changes)) {
-        if (field === "tags") {
+        if (field === "author") {
+            if (!["", "his", "hers"].includes(value)) throw new Error("author must be his or hers, or an empty string.");
+            properties[field] = { select: value ? { name: value } : null };
+        } else if (field === "verified" || field === "private") {
+            if (typeof value !== "boolean") throw new Error(`${field} must be a boolean.`);
+            properties[field] = { checkbox: value };
+        } else if (field === "tags") {
             if (!Array.isArray(value) || value.length > 100 ||
                 value.some((tag) => typeof tag !== "string" || !tag.trim() || tag.length > 100) ||
                 new Set(value.map((tag) => tag.trim())).size !== value.length) {
@@ -102,7 +114,7 @@ async function listRecipes(req, res, next) {
                 ...(req.path === "/recipes/search"
                     ? { filter: { property: "name", title: { contains: req.query.name.trim() } } } : {}),
             });
-            recipes.push(...page.results.map(getRecipe));
+            recipes.push(...page.results.map(getRecipe).filter((recipe) => res.locals.includePrivate || !recipe.private));
             cursor = page.next_cursor;
         } while (cursor);
         res.json(recipes);
@@ -115,7 +127,7 @@ async function loadRecipe(req, res, next) {
     try {
         const page = await res.locals.notion.pages.retrieve({ page_id: req.params.id });
         if (page.parent?.database_id?.replace(/-/g, "") !== res.locals.databaseId.replace(/-/g, "") ||
-            page.archived || page.in_trash) {
+            page.archived || page.in_trash || (!res.locals.includePrivate && page.properties?.private?.checkbox === true)) {
             return res.status(404).json({ error: "Recipe not found." });
         }
         res.locals.page = page;
